@@ -1,62 +1,54 @@
-# Example: Production deployment workflow.
-# Same pattern as staging, but environment=production. Reports In Progress /
-# Success / Failure to the OpenProject bridge.
-#
-# Required GitHub repo secrets:
-#   OPENPROJECT_BRIDGE_URL
-#   OPENPROJECT_WEBHOOK_SECRET
-#
-# Copy to: <app-repo>/.github/workflows/deploy-production.yml
 name: Deploy Production
 
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
   workflow_dispatch:
-
-concurrency:
-  group: production
-  cancel-in-progress: false
 
 jobs:
   deploy-production:
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://app.example.com
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Notify OpenProject - production in progress
-        uses: ./.github/actions/notify-openproject
-        with:
-          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
-          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
-          environment: production
-          status: in_progress
+        env:
+          BRIDGE_URL: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
+          SECRET: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
+        run: |
+          BODY=$(jq -cn --arg env production --arg status in_progress \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg commit "$GITHUB_SHA" \
+            --arg commitMessage "$(git log -1 --pretty=%B)" \
+            --arg deployedBy "$GITHUB_ACTOR" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            '{environment:$env,status:$status,repository:$repo,branch:$branch,commit:$commit,commitMessage:$commitMessage,deployedBy:$deployedBy,workflow:$workflow}')
+          SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+          curl -sS -X POST "$BRIDGE_URL/deployments" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
 
       - name: Deploy to production
-        id: deploy
-        run: echo "Run your real production deploy here"
+        run: echo "Simulating production deploy (replace with real deploy command)."
 
-      - name: Notify OpenProject - production success
-        if: success()
-        uses: ./.github/actions/notify-openproject
-        with:
-          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
-          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
-          environment: production
-          status: success
-          url: https://app.example.com
-
-      - name: Notify OpenProject - production failure
-        if: failure()
-        uses: ./.github/actions/notify-openproject
-        with:
-          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
-          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
-          environment: production
-          status: failure
-          reason: "Production deployment workflow failed"
+      - name: Notify OpenProject - production result
+        if: always()
+        env:
+          BRIDGE_URL: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
+          SECRET: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
+          RESULT: ${{ job.status }}
+        run: |
+          STATUS=success
+          [ "$RESULT" = "success" ] || STATUS=failure
+          BODY=$(jq -cn --arg env production --arg status "$STATUS" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg commit "$GITHUB_SHA" \
+            --arg commitMessage "$(git log -1 --pretty=%B)" \
+            --arg deployedBy "$GITHUB_ACTOR" \
+            --arg url "https://app.example.com" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            '{environment:$env,status:$status,repository:$repo,branch:$branch,commit:$commit,commitMessage:$commitMessage,deployedBy:$deployedBy,url:$url,workflow:$workflow}')
+          SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.* //')"
+          curl -sS -X POST "$BRIDGE_URL/deployments" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
