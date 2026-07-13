@@ -1,0 +1,62 @@
+# Example: Production deployment workflow.
+# Same pattern as staging, but environment=production. Reports In Progress /
+# Success / Failure to the OpenProject bridge.
+#
+# Required GitHub repo secrets:
+#   OPENPROJECT_BRIDGE_URL
+#   OPENPROJECT_WEBHOOK_SECRET
+#
+# Copy to: <app-repo>/.github/workflows/deploy-production.yml
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Notify OpenProject - production in progress
+        uses: ./.github/actions/notify-openproject
+        with:
+          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
+          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
+          environment: production
+          status: in_progress
+
+      - name: Deploy to production
+        id: deploy
+        run: echo "Run your real production deploy here"
+
+      - name: Notify OpenProject - production success
+        if: success()
+        uses: ./.github/actions/notify-openproject
+        with:
+          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
+          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
+          environment: production
+          status: success
+          url: https://app.example.com
+
+      - name: Notify OpenProject - production failure
+        if: failure()
+        uses: ./.github/actions/notify-openproject
+        with:
+          bridge-url: ${{ secrets.OPENPROJECT_BRIDGE_URL }}
+          webhook-secret: ${{ secrets.OPENPROJECT_WEBHOOK_SECRET }}
+          environment: production
+          status: failure
+          reason: "Production deployment workflow failed"
